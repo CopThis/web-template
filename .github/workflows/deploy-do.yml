@@ -53,7 +53,7 @@ jobs:
         run: doctl registry login --expiry-seconds 1200
 
       - name: Set up pack
-        uses: buildpacks/github-actions/setup-pack@v5
+        uses: buildpacks/github-actions/setup-pack@v5.12.5
 
       # Buildpack build (no Dockerfile). --publish pushes straight to DOCR.
       # REACT_APP_* are baked into the client bundle AT BUILD TIME. These values
