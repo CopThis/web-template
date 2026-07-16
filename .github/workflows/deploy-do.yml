@@ -1,0 +1,81 @@
+name: Deploy to DigitalOcean
+
+# Deploys the Sharetribe marketplace app (GCP Cloud Run service `merchagogo`)
+# to DigitalOcean App Platform.
+#
+# This repo has NO Dockerfile — GCP built it with Cloud Native Buildpacks via
+# `gcloud run deploy --source`. This workflow replicates that with `pack`
+# (Paketo builder), so no Dockerfile has to be authored/maintained in a
+# third-party template. To match GCP exactly instead, swap the builder for
+# `gcr.io/buildpacks/builder:google-22`.
+#
+# PREREQUISITE (Phase 3 provisioning — not yet done as of 2026-07-16):
+#   - DOCR repo `merchagogo` in registry `merchbar-registry`
+#   - App Platform app created, its id set as DO_MERCHAGOGO_APP_ID
+#   When created, mark SHARETRIBE_SDK_CLIENT_SECRET and GOOGLE_CLIENT_SECRET as
+#   type: SECRET (on GCP they are stored as PLAINTEXT env — do not repeat that).
+#
+# BUILD-TIME ENV — IMPORTANT: Sharetribe web-template is create-react-app based,
+# so REACT_APP_* vars are baked into the client bundle AT BUILD TIME, not read
+# at runtime. The build below passes the ones we know; a full audit of which
+# REACT_APP_* the client needs is required before this produces a correct bundle.
+#
+# Required repo secrets:
+#   DIGITALOCEAN_ACCESS_TOKEN  - doctl auth + DOCR login + apps deploy
+# Required repo variables:
+#   DO_MERCHAGOGO_APP_ID       - App Platform app id
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-do-merchagogo
+  cancel-in-progress: false
+
+env:
+  IMAGE: registry.digitalocean.com/merchbar-registry/merchagogo
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to DOCR
+        run: doctl registry login --expiry-seconds 1200
+
+      - name: Set up pack
+        uses: buildpacks/github-actions/setup-pack@v5
+
+      # Buildpack build (no Dockerfile). --publish pushes straight to DOCR.
+      # REACT_APP_* are baked into the client bundle AT BUILD TIME. These values
+      # were recovered from the live GCP bundle 2026-07-16 (all client-side
+      # public values). No Maps token — web-template gets map config from
+      # Sharetribe hosted config.
+      - name: Build and push image
+        run: |
+          pack build "${IMAGE}:${GITHUB_SHA}" \
+            --tag "${IMAGE}:latest" \
+            --builder paketobuildpacks/builder-jammy-base \
+            --env NODE_ENV=production \
+            --env REACT_APP_ENV=production \
+            --env REACT_APP_SHARETRIBE_USING_SSL=true \
+            --env REACT_APP_SHARETRIBE_SDK_TRANSIT_VERBOSE=false \
+            --env REACT_APP_SHARETRIBE_SDK_CLIENT_ID=aa587568-d6a6-4f9e-be1f-cd2dec87cc6d \
+            --env REACT_APP_MARKETPLACE_ROOT_URL=https://www.merchagogo.com \
+            --env REACT_APP_MARKETPLACE_NAME=Merchagogo \
+            --env REACT_APP_GOOGLE_CLIENT_ID=361420938152-hduqdtl6hacor5vivl42h7csrgdsvmhg.apps.googleusercontent.com \
+            --env REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_live_51Q1BviISdziHFucBW9FJuUogOBUgKbHE58Sf81nSZBY2tFrISj8lGLsI67x58QO6iceov0x9NFGT7UrifUnY2omD00iCJuNEgC \
+            --publish
+
+      - name: Deploy to App Platform
+        run: |
+          doctl apps create-deployment "${{ vars.DO_MERCHAGOGO_APP_ID }}" --wait
