@@ -52,29 +52,35 @@ jobs:
       - name: Log in to DOCR
         run: doctl registry login --expiry-seconds 1200
 
-      - name: Set up pack
-        uses: buildpacks/github-actions/setup-pack@v5.12.5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      # Buildpack build (no Dockerfile). --publish pushes straight to DOCR.
-      # REACT_APP_* are baked into the client bundle AT BUILD TIME. These values
-      # were recovered from the live GCP bundle 2026-07-16 (all client-side
-      # public values). No Maps token — web-template gets map config from
-      # Sharetribe hosted config.
+      # Docker build (App Platform can't run a CNB/buildpack image's launcher).
+      # REACT_APP_* are baked into the client bundle AT BUILD TIME via build-args.
+      # Recovered from the live GCP bundle 2026-07-16 (all client-side public
+      # values). No Maps token — web-template gets map config from Sharetribe
+      # hosted config.
       - name: Build and push image
-        run: |
-          pack build "${IMAGE}:${GITHUB_SHA}" \
-            --tag "${IMAGE}:latest" \
-            --builder paketobuildpacks/builder-jammy-base \
-            --env NODE_ENV=production \
-            --env REACT_APP_ENV=production \
-            --env REACT_APP_SHARETRIBE_USING_SSL=true \
-            --env REACT_APP_SHARETRIBE_SDK_TRANSIT_VERBOSE=false \
-            --env REACT_APP_SHARETRIBE_SDK_CLIENT_ID=aa587568-d6a6-4f9e-be1f-cd2dec87cc6d \
-            --env REACT_APP_MARKETPLACE_ROOT_URL=https://www.merchagogo.com \
-            --env REACT_APP_MARKETPLACE_NAME=Merchagogo \
-            --env REACT_APP_GOOGLE_CLIENT_ID=361420938152-hduqdtl6hacor5vivl42h7csrgdsvmhg.apps.googleusercontent.com \
-            --env REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_live_51Q1BviISdziHFucBW9FJuUogOBUgKbHE58Sf81nSZBY2tFrISj8lGLsI67x58QO6iceov0x9NFGT7UrifUnY2omD00iCJuNEgC \
-            --publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            REACT_APP_ENV=production
+            REACT_APP_SHARETRIBE_USING_SSL=true
+            REACT_APP_SHARETRIBE_SDK_TRANSIT_VERBOSE=false
+            REACT_APP_SHARETRIBE_SDK_CLIENT_ID=aa587568-d6a6-4f9e-be1f-cd2dec87cc6d
+            REACT_APP_MARKETPLACE_ROOT_URL=https://www.merchagogo.com
+            REACT_APP_MARKETPLACE_NAME=Merchagogo
+            REACT_APP_GOOGLE_CLIENT_ID=361420938152-hduqdtl6hacor5vivl42h7csrgdsvmhg.apps.googleusercontent.com
+            REACT_APP_STRIPE_PUBLISHABLE_KEY=pk_live_51Q1BviISdziHFucBW9FJuUogOBUgKbHE58Sf81nSZBY2tFrISj8lGLsI67x58QO6iceov0x9NFGT7UrifUnY2omD00iCJuNEgC
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.IMAGE }}:latest
+          cache-to: type=inline
 
       - name: Deploy to App Platform
         run: |
